@@ -53,7 +53,7 @@ def create_training_and_testing_arrays(x:array,y:array,train_data_percentage=1):
     test_y = y[train_size:len(x),:]
     return [train_x,train_y,test_x,test_y]
 
-def create_input_and_output_arrays_for_nn(input_df,label_df,look_back,*cols_to_drop):
+def create_input_and_output_arrays_for_nn(input_df,label_df,look_back,cols_to_drop):
     #drop cols
     [input_df,label_df] = equalize_num_inputs_with_num_labels(input_df,label_df,look_back)
     [input_array,dropped_cols,input_df_mean,input_df_std] = create_input_array(input_df,cols_to_drop)
@@ -69,12 +69,12 @@ def create_input_array(input_df:pd.DataFrame, cols_to_drop = None):
     input_df = input_df.reset_index(drop=True)
     input_df = input_df.drop(columns = ['event_type'])
     #get rid of 0 variance columns
-    if cols_to_drop == None or cols_to_drop == (None,):
+    if cols_to_drop == None:
         #drop cols as normal
         [dropped_cols,input_df] = drop_low_stdev_columns(input_df)
     else:
         #drop the specified columns
-        input_df = input_df.drop(columns = list(cols_to_drop)[0])
+        input_df = input_df.drop(columns = cols_to_drop)
         dropped_cols = cols_to_drop
     #normalize and keep the normalizers
     input_df_mean = input_df.mean()
@@ -108,7 +108,6 @@ def equalize_num_inputs_with_num_labels(input_df:pd.DataFrame,label_df,look_back
         new_label_df = label_df
         new_input_df = pd.DataFrame()
         idx = 0
-        label_rows_to_remove = []
         for label_timestamp in label_timestamps:
             mini_input_df = input_df.loc[pd.Timestamp.min:label_timestamp]
             if len(mini_input_df) < look_back:

@@ -1,4 +1,5 @@
 #TODO LATER: we currently convert this to a dict then work with it. see if there is a better way
+#TODO LATER: allow customizing of features, ccy pairs etc. Maybe drop this and just use a dictionary...
 
 class InputRow:
     def __init__(self):

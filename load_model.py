@@ -1,5 +1,5 @@
 from tensorflow import keras
-model = keras.models.load_model('Customer1019DataModel.h5')
+model = keras.models.load_model('functional_model.h5')
 i=0
 for layer in model.layers:
     print("--------Layer " + str(i) + "--------")

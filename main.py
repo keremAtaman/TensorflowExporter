@@ -2,76 +2,70 @@ from data.data_handler import CustomerDataHandler
 import pandas as pd
 import data_helper as dh
 from numpy import reshape
-from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.layers import Dense, LSTM
 from tensorflow.keras.layers import Input
 from tensorflow.keras.models import Model
+from run_config import RunConfig as rc
+from data import data_master as dm
+import pickle
 
 #TODO LATER: move data reshaping to somewhere else
 #TODO LATER: move neural net creation to somewhere else
-
-#TODO: deal with input and output sizes being unequal
-#TODO: training and testing datasets. They need to be acquired seperately
-
-#One sequence is one sample. A batch is comprised of one or more samples
-look_back = 16
-train_data_percentage = 0.67
+# TODO LATER: multithreading
 
 # =================== generate customer train data ===================
-cdh = CustomerDataHandler(from_timestamp='2020-01-01 00:00:00',
-                             to_timestamp = '2020-09-30 08:59:59',
-                             label_from_timestamp = '2020-01-01 00:00:00',
-                             label_to_timestamp = '2020-09-30 23:59:00') 
-[train_x_df,train_y_df] = cdh.work()
-train_x_df.to_csv('741_train_x.csv')
-train_y_df.to_csv('741_train_y.csv')
-# =================== Use Existing Data ===================
-# train_x_df = pd.read_csv('741_train_x.csv', index_col=[0])
-# train_y_df = pd.read_csv('741_train_y.csv', index_col=[0])
-# train_x_df['event_ts'] = pd.to_datetime(train_x_df.event_ts)
-# train_y_df['event_ts'] = pd.to_datetime(train_y_df.event_ts)
-# =========================================================
-[train_x,train_y,dropped_cols] = dh.create_input_and_output_arrays_for_nn(train_x_df,train_y_df,look_back,None)
-num_features = train_x.shape[2]
-num_labels = train_y.shape[1]
+outputs = dm.work()
 
-# =================== generate customer test data ===================
-cdh = CustomerDataHandler(from_timestamp='2020-10-01 00:00:00',
-                             to_timestamp = '2020-12-30 08:59:59',
-                             label_from_timestamp = '2020-10-01 00:00:00',
-                             label_to_timestamp = '2020-12-30 23:59:00') 
-[test_x_df,test_y_df] = cdh.work()
-test_x_df.to_csv('741_test_x.csv')
-test_y_df.to_csv('741_test_y.csv')
-# =================== Use Existing Data ===================
-# test_x_df = pd.read_csv('741_test_x.csv', index_col=[0])
-# test_y_df = pd.read_csv('741_test_y.csv', index_col=[0])
-# test_x_df['event_ts'] = pd.to_datetime(test_x_df.event_ts)
-# test_y_df['event_ts'] = pd.to_datetime(test_y_df.event_ts)
-# =========================================================
-[test_x,test_y,dropped_cols] = dh.create_input_and_output_arrays_for_nn(test_x_df,test_y_df,look_back,dropped_cols)
+model = None
+num_features = outputs[rc.DataConfig.rqstr_party_id_list[0]]['train'][0].shape[2]
+num_labels = outputs[rc.DataConfig.rqstr_party_id_list[0]]['train'][1].shape[1]
+results = {}
+for rqstr_party_id in outputs:
+    train_x = outputs[rqstr_party_id]['train'][0]
+    train_y = outputs[rqstr_party_id]['train'][1]
+    test_x = outputs[rqstr_party_id]['test'][0]
+    test_y = outputs[rqstr_party_id]['test'][1]
+    # num steps before a model is updated 
+    #batch_size = train_x.shape[0]
+    batch_size = rc.NNConfig.batch_size
+    #train the model using a single ctpty
+    if rqstr_party_id == rc.DataConfig.rqstr_party_id_list[0]:
+        visible = Input(shape=(rc.NNConfig.look_back,num_features))
+        hidden1 = LSTM(rc.NNConfig.lstm_state_size)(visible)
+        output = Dense(num_labels)(hidden1)
+        model = Model(inputs=visible, outputs=output)
+        model.compile(optimizer = rc.NNConfig.optimizer, loss=rc.NNConfig.loss, metrics = rc.NNConfig.metrics)
+        #monitor = 'loss' is also available
+        model.fit(train_x,train_y, epochs= rc.NNConfig.epochs, callbacks = rc.NNConfig.callbacks)
+        # model.fit(train_x,train_y, epochs= num_epochs)
 
-#define nn
-num_epochs = 100
-# num steps before a model is updated 
-batch_size = train_x.shape[0]
-test_batch_size = test_x.shape[0]
-lstm_state_size = 64
-visible = Input(shape=(look_back,num_features))
-hidden1 = LSTM(lstm_state_size)(visible)
-output = Dense(num_labels)(hidden1)
-model = Model(inputs=visible, outputs=output)
-model.compile(optimizer = 'sgd', loss='mse', metrics = ['accuracy','mse'])
-#monitor = 'loss' is also available
-es = EarlyStopping(monitor='accuracy', restore_best_weights = True, patience = 3)
-model.fit(train_x,train_y, epochs= num_epochs, callbacks = [es])
-# model.fit(train_x,train_y, epochs= num_epochs)
+        if len(test_x)>0:
+            print("=========================testing " +str(rqstr_party_id) + "=========================")
+            results[rqstr_party_id] = model.evaluate(test_x,test_y,batch_size)
+            print("==================================================")
+    
+    else:
+        print("=========================testing " +str(rqstr_party_id) + "=========================")
+        results[rqstr_party_id] = model.evaluate(train_x,train_y,batch_size)
+        print("==================================================")
 
-if len(test_x)>0:
-    print("=========================testing=========================")
-    results = model.evaluate(test_x,test_y,test_batch_size)
 
 #save model
 model.save('functional_model.h5')
+
+#TODO: pickle/write out the results and config with naming similar to csv file format ()
+# results is in form [loss,accuracy]
+print(results)
+# pickle.dump( [], open( "save.p", "wb" ) )
+
+#print out model details
+print("--------Layer " + "MODEL DETAILS" + "--------")
+i = 0
+for layer in model.layers:
+    print("--------Layer " + str(i) + "--------")
+    print("name: " + layer.name)
+    print("input shape: " + str(layer.input_shape))
+    print("output shape: " + str(layer.output_shape))
+    i+=1
 
 print("All Done!")

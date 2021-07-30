@@ -1,5 +1,3 @@
-#TODO LATER: add datetime.timedelta and revamp period_end_ts
-
 class CS:
     def __init__(self,symbol,period_end_ts,
                 o,h,l,c):

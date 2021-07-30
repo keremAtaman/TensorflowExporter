@@ -2,30 +2,32 @@
 #TODO LATER: somehow tell the algo that events happened X hours before predictions. Maybe num_days_since_last_activity?
 #TODO LATER: self.ccy_pair_variables is too shaky. Have an individual tracker object for each event and/or ccy pair
 #TODO LATER: data processing takes too long
-#TODO: cs in case other cs
-#TODO: remove the need for label_from_timestamp and label_to_timestamp. Make it hour instead or sth
 
 import pandas as pd
-import sql.database_helper as dh
+import database.database_handler as dh
 from data.input_row import InputRow as IR
 from data.cs import CS
 from data.ccypos import CcyPos
 from data.pos import Pos
+from datetime import datetime
+import os
 
 
 class CustomerDataHandler:
-    #FIXME: tracking variables for event_types. Probably need to be in their own class
-
-    def __init__(self, party_id = 741,
+    #FIXME: tracking variables for event_types. Probably need to be in their own class for handling, tracking...
+    #TODO LATER: ability to change ccy_pair_list based on query (watch out for input_row object, that will need to be changed as well!)
+    def __init__(self, rqstr_party_id = 741,
                 event_list = ['ccypos','cs','login','panel','pos','transaction'],
                 ccy_pair_list = ['USDCAD','EURUSD','EURCAD','GBPUSD'],
                 from_timestamp = '2020-01-01 00:00:00',
                 to_timestamp = '2020-01-07 08:59:59',
-                label_from_timestamp='2020-01-01 09:00:00',
-                label_to_timestamp='2020-01-07 23:59:00',
-                label_time_interval='24 hours'):
+                label_starting_time = '09:00:00',
+                label_time_interval='24 hours',
+                connection_credentials = 'database/credentials.json',
+                input_csv = None,
+                label_csv = None):
         
-        self.rqstr_party_id = party_id
+        self.rqstr_party_id = rqstr_party_id
         self.event_list = event_list
         self.ccy_pair_list = ccy_pair_list
         self.ccy_pair_variables = {}
@@ -33,9 +35,11 @@ class CustomerDataHandler:
             self.ccy_pair_variables[ccy_pair] = {}
         self.from_timestamp = from_timestamp
         self.to_timestamp = to_timestamp
-        self.label_from_timestamp = label_from_timestamp
-        self.label_to_timestamp = label_to_timestamp
+        self.label_starting_time = label_starting_time
         self.label_time_interval = label_time_interval
+        self.connection_credentials = connection_credentials
+        self.input_csv = input_csv
+        self.label_csv = label_csv
 
         self.numberOfUsers = 0
         self.previous_event_ts = None
@@ -46,52 +50,70 @@ class CustomerDataHandler:
         for ccy_pair in ccy_pair_list:
             self.ccy_list.add(ccy_pair[0:3])
             self.ccy_list.add(ccy_pair[3:6])
+        self.label_from_timestamp = from_timestamp[:-8] + self.label_starting_time
 
 
     def work(self):
-        conn = dh.get_connection('sql/credentials.json')
-        
-        # get the input data for the given customer
-        self.timestamp_df = pd.DataFrame(columns = ['event_ts','event_type'])
-        self.df_dict = {}
-        self.df_index_dict = {}
-        self.input_df = pd.DataFrame()
-        for event_type in self.event_list:
-            with open('sql/'+event_type+'.sql','r') as file:
+        conn = None
+
+        #get label 
+        if (os.path.exists(self.label_csv)):
+            self.label_df = pd.read_csv(self.label_csv, index_col=[0])
+            self.label_df['event_ts'] = pd.to_datetime(self.label_df.event_ts)
+        else:
+            #label
+            if conn == None:
+                conn = dh.get_connection(self.connection_credentials)
+            with open('database/label.sql','r') as file:
                 sql_query = file.read()
-            ccy_pair_list_ = str(self.ccy_pair_list)
-            ccy_pair_list_ = ccy_pair_list_.replace("[","(")
-            ccy_pair_list_ = ccy_pair_list_.replace("]",")")
-            sql_query = sql_query.replace(r'$P{ccy_pair_list}',ccy_pair_list_)
             sql_query = sql_query.replace(r'$P{rqstr_party_id}',str(self.rqstr_party_id))
-            sql_query = sql_query.replace(r'$P{from_timestamp}','\''+self.from_timestamp+'\'')
+            sql_query = sql_query.replace(r'$P{from_timestamp}','\''+self.label_from_timestamp+'\'')
             sql_query = sql_query.replace(r'$P{to_timestamp}','\''+self.to_timestamp+'\'')
-            df = pd.read_sql(sql_query, conn,parse_dates={'event_ts':'%y-%m-%d %H:%M:%S','valuedate':'%y-%m-%d %H:%M:%S'})
+            sql_query = sql_query.replace(r'$P{label_time_interval}','\''+self.label_time_interval+'\'')
+            self.label_df = pd.read_sql(sql_query, conn,parse_dates={'event_ts':'%y-%m-%d %H:%M:%S'})
+            self.next_label_ts = self.label_df.iloc[0]['event_ts']
 
-            temp_df = df['event_ts'].to_frame()
-            temp_df.insert(1,'event_type',[event_type]*len(df),True)
-            self.timestamp_df = self.timestamp_df.append(temp_df)
-            self.df_dict[event_type] = df
-            self.df_index_dict[event_type] = 0
+        # check if saved csv file exists. If yes, read it instead of processing
+        if (os.path.exists(self.input_csv)):
+            self.input_df = pd.read_csv(self.input_csv, index_col=[0])
+            self.input_df['event_ts'] = pd.to_datetime(self.input_df.event_ts)
+        else:            
+            if conn == None:
+                conn = dh.get_connection(self.connection_credentials)
+            # get the input data for the given customer
+            self.timestamp_df = pd.DataFrame(columns = ['event_ts','event_type'])
+            self.df_dict = {}
+            self.df_index_dict = {}
+            self.input_df = pd.DataFrame()
+            for event_type in self.event_list:
+                # FIXME: feed sql query locations instead of hard coding them
+                with open('database/'+event_type+'.sql','r') as file:
+                    sql_query = file.read()
+                ccy_pair_list_ = str(self.ccy_pair_list)
+                ccy_pair_list_ = ccy_pair_list_.replace("[","(")
+                ccy_pair_list_ = ccy_pair_list_.replace("]",")")
+                sql_query = sql_query.replace(r'$P{ccy_pair_list}',ccy_pair_list_)
+                sql_query = sql_query.replace(r'$P{rqstr_party_id}',str(self.rqstr_party_id))
+                sql_query = sql_query.replace(r'$P{from_timestamp}','\''+self.from_timestamp+'\'')
+                sql_query = sql_query.replace(r'$P{to_timestamp}','\''+self.to_timestamp+'\'')
+                df = pd.read_sql(sql_query, conn,parse_dates={'event_ts':'%y-%m-%d %H:%M:%S','valuedate':'%y-%m-%d %H:%M:%S'})
 
-        #label
-        with open('sql/label.sql','r') as file:
-            sql_query = file.read()
-        sql_query = sql_query.replace(r'$P{rqstr_party_id}',str(self.rqstr_party_id))
-        sql_query = sql_query.replace(r'$P{label_from_timestamp}','\''+self.label_from_timestamp+'\'')
-        sql_query = sql_query.replace(r'$P{label_to_timestamp}','\''+self.label_to_timestamp+'\'')
-        sql_query = sql_query.replace(r'$P{label_time_interval}','\''+self.label_time_interval+'\'')
-        self.label_df = pd.read_sql(sql_query, conn,parse_dates={'event_ts':'%y-%m-%d %H:%M:%S'})
-        self.next_label_ts = self.label_df.iloc[0]['event_ts']
+                temp_df = df['event_ts'].to_frame()
+                temp_df.insert(1,'event_type',[event_type]*len(df),True)
+                self.timestamp_df = self.timestamp_df.append(temp_df)
+                self.df_dict[event_type] = df
+                self.df_index_dict[event_type] = 0
+            #Order the events in the timestamp_df
+            self.timestamp_df = self.timestamp_df.sort_values(by=['event_ts'])
+            #write the ordered events as inputs
+            for index,row in self.timestamp_df.iterrows():
+                self.event_handler(row['event_type'])
 
-        conn.close()
-
-        #Order the events in the timestamp_df
-        self.timestamp_df = self.timestamp_df.sort_values(by=['event_ts'])
-        #write the ordered events as inputs
-        for index,row in self.timestamp_df.iterrows():
-            self.event_handler(row['event_type'])
-
+        try:
+            conn.close()
+        except:
+            pass
+        
         return [self.input_df,self.label_df]
 
     def event_handler(self,event_type):
@@ -198,6 +220,16 @@ class CustomerDataHandler:
             ir['size'] = row['trade_volumebase']
             
 
+        # TODO LATER: clear ccy_pair_dicts when needed EFFECTIVELY
+        # check if the day changed since the last ts
+        # if (datetime.strptime(self.previous_event_ts,'%Y-%m-%d %H:%M:%S')).date() < (datetime.strptime(event_ts,'%Y-%m-%d %H:%M:%S')).date():
+        #     for ccy_pair in self.ccy_pair_list:
+        #         # exposure
+        #         ccy_list = [ccy_pair[0:3],ccy_pair[3:6]]
+        #         for ccy in ccy_list:
+        #             if 'exposure' in self.ccy_pair_variables[ccy_pair]:
+        #                 test[8:18]
+
         #time delta shenanigans
         if self.previous_event_ts == None:
             ir['timeDelta'] = 0
@@ -216,5 +248,7 @@ class CustomerDataHandler:
 
         self.df_index_dict[event_type] += 1
         self.previous_row = ir
+        
+        
         #append to self.input_df
         self.input_df = self.input_df.append(ir,ignore_index=True)

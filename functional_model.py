@@ -27,16 +27,15 @@ def create_dataset(dataset, look_back=1):
 
 train_data_percentage = 0.67
 
-inputLocation = 'trainingSet8_normalized_65.csv'
-labelLocation = 'trainingSet8_label_65.csv'
-num_epochs = 10
+inputLocation = '741_train_x.csv'
+labelLocation = '741_train_y.csv'
+num_epochs = 100
 lstm_state_size = 64
-look_back = 8
+look_back = 32
 # used to be 1 for some bizzare reason
 batch_size = 32
 
 
-#TODO: use dataframes instead of numpy arrays for the items below
 x = genfromtxt(inputLocation, delimiter=',', skip_header = 1)
 y = genfromtxt(os.getcwd()+'/'+labelLocation, delimiter=',', skip_header = 1)
 num_features = x.shape[1]
@@ -65,4 +64,4 @@ model.fit(trainX,trainY, epochs= num_epochs, callbacks = [es])
 results = model.evaluate(test_x,test_y,batch_size)
 
 #save model
-model.save('functional_model.h5')
+model.save('functional_model_128.h5')
