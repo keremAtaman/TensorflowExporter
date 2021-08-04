@@ -53,21 +53,42 @@ def create_training_and_testing_arrays(x:array,y:array,train_data_percentage=1):
     test_y = y[train_size:len(x),:]
     return [train_x,train_y,test_x,test_y]
 
-def create_input_and_output_arrays_for_nn(input_df,label_df,look_back,cols_to_drop):
+# FIXME: this whole function is a patchwork mess
+def create_input_and_output_arrays_for_nn(
+        input_df,
+        label_df,
+        look_back,
+        cols_to_drop,
+        input_mean:pd.Series = pd.Series(),
+        input_std:pd.Series = pd.Series(),
+        label_mean:pd.Series = pd.Series(),
+        label_std:pd.Series = pd.Series())->dict:
     #drop cols
     [input_df,label_df] = equalize_num_inputs_with_num_labels(input_df,label_df,look_back)
-    [input_array,dropped_cols,input_df_mean,input_df_std] = create_input_array(input_df,cols_to_drop)
-    [label_array,label_df_mean,label_df_std] = create_label_array(label_df)
+    [input_array,dropped_cols,input_df_mean,input_df_std] = create_input_array(input_df,cols_to_drop,input_mean,input_std)
+    [label_array,label_df_mean,label_df_std] = create_label_array(label_df,label_mean,label_std)
     [train_x,train_y,test_x,test_y] = create_training_and_testing_arrays(input_array,label_array)
     train_x = reshape_input_for_nn(train_x,look_back,train_y.shape[0])
-    return [train_x,train_y,dropped_cols]
+    return {'train_x':train_x,
+            'train_x_mean': input_df_mean,
+            'train_x_std':input_df_std,
+            'train_y':train_y,
+            'train_y_mean':label_df_mean,
+            'train_y_std':label_df_std,
+            'dropped_input_cols':dropped_cols}
 
 
-def create_input_array(input_df:pd.DataFrame, cols_to_drop = None):
+def create_input_array(
+    input_df:pd.DataFrame, 
+    cols_to_drop = None,
+    mean:pd.Series = pd.Series(),
+    std:pd.Series = pd.Series()):
     #input_array creation
     #drop non-numerical columns
     input_df = input_df.reset_index(drop=True)
     input_df = input_df.drop(columns = ['event_type'])
+    #convert NaNs to zeros
+    input_df = input_df.fillna(0)
     #get rid of 0 variance columns
     if cols_to_drop == None:
         #drop cols as normal
@@ -77,28 +98,34 @@ def create_input_array(input_df:pd.DataFrame, cols_to_drop = None):
         input_df = input_df.drop(columns = cols_to_drop)
         dropped_cols = cols_to_drop
     #normalize and keep the normalizers
-    input_df_mean = input_df.mean()
-    input_df_std = input_df.std()
-    input_df=(input_df-input_df.mean())/input_df.std()
-    #convert NaNs to zeros
-    input_df = input_df.fillna(0)
+    if len(mean) == 0:
+        mean = input_df.mean()
+    if len(std) == 0:
+        std = input_df.std()
+    input_df=(input_df-mean)/std
+    
     #convert to numpy array
     input_array = input_df.to_numpy()
 
-    return [input_array,dropped_cols,input_df_mean,input_df_std]
+    return [input_array,dropped_cols,mean,std]
 
-def create_label_array(label_df:pd.DataFrame):
+def create_label_array(
+    label_df:pd.DataFrame,
+    mean:pd.Series = pd.Series(),
+    std:pd.Series = pd.Series()):
     #drop non-numerical columns
     label_df = label_df.drop(columns = ['event_ts'])
     #normalize
-    label_df_mean = label_df.mean()
-    label_df_std = label_df.std()
-    label_df = (label_df-label_df.mean())/label_df.std()
+    if len(mean) == 0:
+        mean = label_df.mean()
+    if len(std) == 0:
+        std = label_df.std()
+    label_df = (label_df-mean)/std
     #convert NaNs to zeros
     label_df = label_df.fillna(0)
     #convert to numpy array
     label_array = label_df.to_numpy()
-    return [label_array,label_df_mean,label_df_std]
+    return [label_array,mean,std]
 
 def equalize_num_inputs_with_num_labels(input_df:pd.DataFrame,label_df,look_back):
         label_timestamps = label_df['event_ts']
