@@ -74,21 +74,16 @@ class RunConfig():
         # =================================== DATA CONFIGS ==============================================================================
         # The first ctpty is the one that will be used for training, removing cols etc
         # rqstr_party_id_list = [616,741,597]
-        rqstr_party_id_list = [597]
+        # TODO: 50,344
+        rqstr_party_id_list = [344]
         # TODO: use event_enums (e.g. EVENT_TYPE.ccypos.value) instead of strings
-        # event_list: list(EVENT_TYPE) = [EVENT_TYPE.ccypos,
-        #             EVENT_TYPE.cs,
-        #             EVENT_TYPE.login,
-        #             EVENT_TYPE.panel,
-        #             EVENT_TYPE.pos,
-        #             EVENT_TYPE.transaction]
-        event_list: List[EVENT_TYPE] = [
-            EVENT_TYPE.ccypos,
-            EVENT_TYPE.pos,
-            EVENT_TYPE.cs,
-            EVENT_TYPE.login,
-            EVENT_TYPE.transaction,
-            EVENT_TYPE.date]
+        event_list: list(EVENT_TYPE) = [EVENT_TYPE.ccypos,
+                    EVENT_TYPE.cs,
+                    EVENT_TYPE.login,
+                    EVENT_TYPE.panel,
+                    EVENT_TYPE.pos,
+                    EVENT_TYPE.transaction,
+                    EVENT_TYPE.date]
         ccy_pair_list = ['USDCAD',
                             'EURUSD',
                             'EURCAD',
